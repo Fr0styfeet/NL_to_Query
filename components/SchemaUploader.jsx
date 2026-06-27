@@ -1,21 +1,109 @@
 "use client";
 import { useState } from "react";
 
+// ─── DDL Validator ────────────────────────────────────────────────────────────
+// Returns { valid: bool, errors: string[], warnings: string[], tableCount: number }
+function validateDDL(content) {
+  const errors = [];
+  const warnings = [];
+
+  if (!content || !content.trim()) {
+    return { valid: false, errors: ["Schema content is empty."], warnings: [], tableCount: 0 };
+  }
+
+  const lines = content.split("\n");
+  const trimmed = content.trim().toUpperCase();
+
+  // Must have at least one recognizable structure
+  const hasCreate = /CREATE\s+TABLE/i.test(content);
+  const hasCollectionLike = /collection|table|model|schema/i.test(content);
+  const hasColumnLike = /\bINT\b|\bVARCHAR\b|\bTEXT\b|\bBOOLEAN\b|\bTIMESTAMP\b|\bDATE\b|\bDECIMAL\b|\bDOUBLE\b|\bFLOAT\b|\bJSON\b|\bUUID\b/i.test(content);
+
+  if (!hasCreate && !hasCollectionLike) {
+    errors.push("No CREATE TABLE or collection definitions found. Please include table/collection definitions.");
+  }
+
+  if (!hasColumnLike && hasCreate) {
+    warnings.push("No column type keywords detected (e.g. INT, VARCHAR, TEXT). Schema may be incomplete.");
+  }
+
+  // Check for unclosed parentheses
+  let depth = 0;
+  for (const ch of content) {
+    if (ch === "(") depth++;
+    if (ch === ")") depth--;
+    if (depth < 0) {
+      errors.push("Mismatched parentheses — found a closing ')' without a matching opening '('.");
+      break;
+    }
+  }
+  if (depth > 0) {
+    errors.push(`Mismatched parentheses — ${depth} opening '(' left unclosed.`);
+  }
+
+  // Count tables
+  const tableMatches = content.match(/CREATE\s+TABLE\s+\S+/gi) || [];
+  const tableCount = tableMatches.length;
+
+  // Warn if no primary key at all
+  const hasPK = /PRIMARY\s+KEY|PRIMARY KEY/i.test(content);
+  if (hasCreate && !hasPK) {
+    warnings.push("No PRIMARY KEY found in any table. This is valid but may limit query generation.");
+  }
+
+  // Warn on very short schemas
+  if (content.trim().length < 30) {
+    warnings.push("Schema looks very short — make sure it includes table definitions.");
+  }
+
+  // Detect likely non-DDL plain text
+  const sqlKeywordDensity =
+    (content.match(/\b(CREATE|TABLE|SELECT|INSERT|UPDATE|DELETE|FROM|WHERE|PRIMARY|FOREIGN|REFERENCES|NOT NULL|DEFAULT|INDEX|UNIQUE|CONSTRAINT)\b/gi) || []).length;
+  if (content.trim().length > 100 && sqlKeywordDensity < 2) {
+    warnings.push("Low SQL keyword density — are you sure this is a DDL schema and not plain text?");
+  }
+
+  return {
+    valid: errors.length === 0,
+    errors,
+    warnings,
+    tableCount,
+  };
+}
+
+// ─── Component ────────────────────────────────────────────────────────────────
+const ICONS = ["🗄️", "🔐", "📋", "🧬", "🌐", "🏗️", "📱", "⚙️", "🧪", "🏦", "🛒", "📊"];
+
 export default function SchemaUploader({ onAdd, onCancel }) {
   const [name, setName] = useState("");
   const [content, setContent] = useState("");
   const [icon, setIcon] = useState("🗄️");
   const [description, setDescription] = useState("");
-  const [tab, setTab] = useState("paste"); // "paste" | "file"
+  const [tab, setTab] = useState("paste");
 
-  const ICONS = ["🗄️", "🔐", "📋", "🧬", "🌐", "🏗️", "📱", "⚙️"];
+  // Validation state
+  const [validationResult, setValidationResult] = useState(null); // null = not yet validated
+  const [hasValidated, setHasValidated] = useState(false);
+
+  const handleContentChange = (val) => {
+    setContent(val);
+    // Reset validation when content changes so user knows to re-validate
+    setHasValidated(false);
+    setValidationResult(null);
+  };
+
+  const handleValidate = () => {
+    const result = validateDDL(content);
+    setValidationResult(result);
+    setHasValidated(true);
+  };
 
   const handleFile = (e) => {
     const file = e.target.files[0];
     if (!file) return;
     const reader = new FileReader();
     reader.onload = (ev) => {
-      setContent(ev.target.result);
+      handleContentChange(ev.target.result);
       if (!name) setName(file.name.replace(/\.[^/.]+$/, ""));
     };
     reader.readAsText(file);
@@ -24,15 +112,25 @@ export default function SchemaUploader({ onAdd, onCancel }) {
   const handleSubmit = (e) => {
     e.preventDefault();
     if (!name.trim() || !content.trim()) return;
+
+    // Always validate on submit
+    const result = validateDDL(content);
+    setValidationResult(result);
+    setHasValidated(true);
+
+    if (!result.valid) return; // block submission if errors
+
     onAdd({
       id: `custom-${Date.now()}`,
       name: name.trim(),
       icon,
-      description: description || "Custom schema",
+      description: description.trim() || "Custom schema",
       color: "#f59e0b",
       content: content.trim(),
     });
   };
+
+  const canSubmit = name.trim() && content.trim();
 
   return (
     <form onSubmit={handleSubmit} className="uploader">
@@ -41,8 +139,9 @@ export default function SchemaUploader({ onAdd, onCancel }) {
         <button type="button" onClick={onCancel} className="close-btn">✕</button>
       </div>
 
-      {/* Icon + Name Row */}
-      <div className="row">
+      {/* Icon picker */}
+      <div className="field">
+        <label className="field-label">Icon</label>
         <div className="icon-picker">
           {ICONS.map((ic) => (
             <button
@@ -57,30 +156,31 @@ export default function SchemaUploader({ onAdd, onCancel }) {
         </div>
       </div>
 
-      <div className="field">
-        <label className="field-label">Schema Name</label>
-        <input
-          type="text"
-          className="field-input"
-          placeholder="e.g. Inventory System"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          required
-        />
+      <div className="row-2">
+        <div className="field" style={{ flex: 1 }}>
+          <label className="field-label">Schema Name *</label>
+          <input
+            type="text"
+            className="field-input"
+            placeholder="e.g. Inventory System"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            required
+          />
+        </div>
+        <div className="field" style={{ flex: 1 }}>
+          <label className="field-label">Short Description</label>
+          <input
+            type="text"
+            className="field-input"
+            placeholder="e.g. Products & stock"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+          />
+        </div>
       </div>
 
-      <div className="field">
-        <label className="field-label">Short Description</label>
-        <input
-          type="text"
-          className="field-input"
-          placeholder="e.g. Products, warehouses & stock"
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-        />
-      </div>
-
-      {/* Tab: Paste vs File */}
+      {/* Tab toggle */}
       <div className="tabs">
         <button
           type="button"
@@ -100,29 +200,104 @@ export default function SchemaUploader({ onAdd, onCancel }) {
 
       {tab === "paste" ? (
         <div className="field">
+          <div className="textarea-header">
+            <label className="field-label">DDL / Schema *</label>
+            {content.trim() && (
+              <button type="button" className="validate-btn" onClick={handleValidate}>
+                ⚡ validate
+              </button>
+            )}
+          </div>
           <textarea
-            className="field-textarea"
-            placeholder={`CREATE TABLE users (\n  id INT PRIMARY KEY,\n  ...\n);`}
+            className={`field-textarea ${
+              hasValidated
+                ? validationResult?.valid
+                  ? "valid"
+                  : "invalid"
+                : ""
+            }`}
+            placeholder={`CREATE TABLE users (\n  id INT PRIMARY KEY,\n  name VARCHAR(100),\n  email VARCHAR(255)\n);`}
             value={content}
-            onChange={(e) => setContent(e.target.value)}
-            rows={8}
+            onChange={(e) => handleContentChange(e.target.value)}
+            rows={9}
             required
           />
         </div>
       ) : (
         <div className="field">
+          <label className="field-label">Upload File</label>
           <label className="file-drop">
-            <input type="file" accept=".sql,.txt,.json,.ddl" onChange={handleFile} className="hidden-input" />
+            <input
+              type="file"
+              accept=".sql,.txt,.json,.ddl"
+              onChange={handleFile}
+              className="hidden-input"
+            />
             <span className="file-icon">📂</span>
-            <span className="file-hint">Drop or click to upload .sql / .txt / .json</span>
-            {content && <span className="file-ok">✓ File loaded ({content.length} chars)</span>}
+            <span className="file-hint">Drop or click — .sql / .txt / .json / .ddl</span>
+            {content && (
+              <span className="file-ok">✓ File loaded ({content.length} chars)</span>
+            )}
           </label>
+          {/* Show validate button after file load */}
+          {content.trim() && (
+            <button
+              type="button"
+              className="validate-btn standalone"
+              onClick={handleValidate}
+            >
+              ⚡ validate schema
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Validation feedback */}
+      {hasValidated && validationResult && (
+        <div className={`validation-panel ${validationResult.valid ? "ok" : "fail"}`}>
+          <div className="val-header">
+            {validationResult.valid ? (
+              <span className="val-status ok">✓ Valid schema</span>
+            ) : (
+              <span className="val-status fail">✕ Validation failed</span>
+            )}
+            {validationResult.tableCount > 0 && (
+              <span className="val-tables">{validationResult.tableCount} table{validationResult.tableCount !== 1 ? "s" : ""} detected</span>
+            )}
+          </div>
+
+          {validationResult.errors.length > 0 && (
+            <ul className="val-list errors">
+              {validationResult.errors.map((e, i) => (
+                <li key={i}><span className="val-dot error">●</span>{e}</li>
+              ))}
+            </ul>
+          )}
+
+          {validationResult.warnings.length > 0 && (
+            <ul className="val-list warnings">
+              {validationResult.warnings.map((w, i) => (
+                <li key={i}><span className="val-dot warn">◆</span>{w}</li>
+              ))}
+            </ul>
+          )}
         </div>
       )}
 
       <div className="uploader-actions">
         <button type="button" onClick={onCancel} className="btn-cancel">Cancel</button>
-        <button type="submit" className="btn-submit">Inject Schema →</button>
+        <button
+          type="submit"
+          className="btn-submit"
+          disabled={!canSubmit}
+          title={
+            hasValidated && !validationResult?.valid
+              ? "Fix validation errors before injecting"
+              : ""
+          }
+        >
+          Inject Schema →
+        </button>
       </div>
 
       <style jsx>{`
@@ -157,11 +332,6 @@ export default function SchemaUploader({ onAdd, onCancel }) {
           transition: color 0.15s;
         }
         .close-btn:hover { color: #fff; }
-        .row {
-          display: flex;
-          gap: 10px;
-          align-items: center;
-        }
         .icon-picker {
           display: flex;
           gap: 4px;
@@ -183,6 +353,10 @@ export default function SchemaUploader({ onAdd, onCancel }) {
         .icon-opt.active {
           border-color: #f59e0b;
           background: #1a1500;
+        }
+        .row-2 {
+          display: flex;
+          gap: 12px;
         }
         .field {
           display: flex;
@@ -208,6 +382,27 @@ export default function SchemaUploader({ onAdd, onCancel }) {
           transition: border-color 0.15s;
         }
         .field-input:focus { border-color: #f59e0b55; }
+
+        .textarea-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+        }
+        .validate-btn {
+          font-family: "DM Mono", monospace;
+          font-size: 9px;
+          color: #f59e0b;
+          background: #1a1500;
+          border: 1px solid #f59e0b33;
+          border-radius: 2px;
+          padding: 3px 9px;
+          cursor: pointer;
+          letter-spacing: 0.05em;
+          transition: all 0.15s;
+        }
+        .validate-btn:hover { background: #241c00; border-color: #f59e0b66; }
+        .validate-btn.standalone { align-self: flex-start; margin-top: 4px; }
+
         .field-textarea {
           background: #060606;
           border: 1px solid #1a1a1a;
@@ -219,12 +414,14 @@ export default function SchemaUploader({ onAdd, onCancel }) {
           outline: none;
           resize: vertical;
           line-height: 1.7;
-          transition: border-color 0.15s;
+          transition: border-color 0.2s;
         }
         .field-textarea:focus { border-color: #f59e0b55; }
+        .field-textarea.valid { border-color: #22c55e55; }
+        .field-textarea.invalid { border-color: #ef444455; }
+
         .tabs {
           display: flex;
-          gap: 0;
           border: 1px solid #1a1a1a;
           border-radius: 3px;
           overflow: hidden;
@@ -245,6 +442,7 @@ export default function SchemaUploader({ onAdd, onCancel }) {
           background: #1a1500;
           color: #f59e0b;
         }
+
         .file-drop {
           display: flex;
           flex-direction: column;
@@ -271,6 +469,71 @@ export default function SchemaUploader({ onAdd, onCancel }) {
           font-size: 10px;
           color: #22c55e;
         }
+
+        /* Validation panel */
+        .validation-panel {
+          border-radius: 3px;
+          padding: 12px 14px;
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+          animation: slideIn 0.15s ease;
+        }
+        @keyframes slideIn {
+          from { opacity: 0; transform: translateY(-4px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+        .validation-panel.ok {
+          background: #061208;
+          border: 1px solid #22c55e22;
+        }
+        .validation-panel.fail {
+          background: #120606;
+          border: 1px solid #ef444422;
+        }
+        .val-header {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+        }
+        .val-status {
+          font-family: "DM Mono", monospace;
+          font-size: 10px;
+          font-weight: 600;
+          letter-spacing: 0.08em;
+        }
+        .val-status.ok { color: #22c55e; }
+        .val-status.fail { color: #ef4444; }
+        .val-tables {
+          font-family: "DM Mono", monospace;
+          font-size: 9px;
+          color: #3a3a3a;
+        }
+        .val-list {
+          list-style: none;
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
+          padding: 0;
+          margin: 0;
+        }
+        .val-list li {
+          font-family: "DM Mono", monospace;
+          font-size: 10px;
+          color: #888;
+          display: flex;
+          align-items: flex-start;
+          gap: 7px;
+          line-height: 1.5;
+        }
+        .val-dot {
+          flex-shrink: 0;
+          font-size: 6px;
+          margin-top: 4px;
+        }
+        .val-dot.error { color: #ef4444; }
+        .val-dot.warn  { color: #f59e0b; }
+
         .uploader-actions {
           display: flex;
           gap: 8px;
@@ -299,7 +562,8 @@ export default function SchemaUploader({ onAdd, onCancel }) {
           cursor: pointer;
           transition: all 0.15s;
         }
-        .btn-submit:hover { background: #241c00; border-color: #f59e0b; }
+        .btn-submit:hover:not(:disabled) { background: #241c00; border-color: #f59e0b; }
+        .btn-submit:disabled { opacity: 0.35; cursor: not-allowed; }
       `}</style>
     </form>
   );

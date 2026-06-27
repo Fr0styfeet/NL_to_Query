@@ -1,30 +1,67 @@
 "use client";
 import { useState } from "react";
 
-export default function SchemaCard({ schema, onSelect }) {
-  const [hovered, setHovered] = useState(false);
+export default function SchemaCard({ schema, onSelect, onDelete, isDeletable }) {
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  const handleDeleteClick = (e) => {
+    e.stopPropagation(); // don't open the schema
+    setConfirmDelete(true);
+  };
+
+  const handleConfirm = (e) => {
+    e.stopPropagation();
+    onDelete(schema.id);
+  };
+
+  const handleCancel = (e) => {
+    e.stopPropagation();
+    setConfirmDelete(false);
+  };
 
   return (
-    <button
-      type="button"
-      onClick={() => onSelect(schema)}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-      className="schema-card"
-      style={{ "--accent": schema.color }}
-    >
+    <div className="schema-card" style={{ "--accent": schema.color }}>
       <div className="card-glow" />
-      <div className="card-inner">
+
+      {/* Main clickable area */}
+      <button
+        type="button"
+        className="card-inner"
+        onClick={() => onSelect(schema)}
+      >
         <div className="card-icon">{schema.icon}</div>
         <div className="card-body">
           <h3 className="card-name">{schema.name}</h3>
           <p className="card-desc">{schema.description}</p>
         </div>
         <div className="card-arrow">→</div>
-      </div>
+      </button>
+
+      {/* Preview strip */}
       <div className="card-preview">
         <pre>{schema.content.split("\n").slice(0, 5).join("\n")}...</pre>
       </div>
+
+      {/* Delete zone — only for custom/deletable schemas */}
+      {isDeletable && (
+        <div className="card-footer">
+          {confirmDelete ? (
+            <div className="confirm-row">
+              <span className="confirm-text">Delete this schema?</span>
+              <button type="button" className="confirm-yes" onClick={handleConfirm}>
+                yes, delete
+              </button>
+              <button type="button" className="confirm-no" onClick={handleCancel}>
+                cancel
+              </button>
+            </div>
+          ) : (
+            <button type="button" className="delete-btn" onClick={handleDeleteClick}>
+              ✕ delete
+            </button>
+          )}
+        </div>
+      )}
 
       <style jsx>{`
         .schema-card {
@@ -33,11 +70,10 @@ export default function SchemaCard({ schema, onSelect }) {
           background: #0d0d0d;
           border: 1px solid #1f1f1f;
           border-radius: 4px;
-          padding: 0;
-          text-align: left;
-          cursor: pointer;
           overflow: hidden;
           transition: border-color 0.2s, transform 0.2s;
+          display: flex;
+          flex-direction: column;
         }
         .schema-card:hover {
           border-color: var(--accent);
@@ -59,6 +95,11 @@ export default function SchemaCard({ schema, onSelect }) {
           align-items: center;
           gap: 14px;
           padding: 18px 20px 14px;
+          background: none;
+          border: none;
+          text-align: left;
+          cursor: pointer;
+          width: 100%;
         }
         .card-icon {
           font-size: 24px;
@@ -97,7 +138,6 @@ export default function SchemaCard({ schema, onSelect }) {
         .card-preview {
           padding: 0 20px 14px;
           border-top: 1px solid #181818;
-          margin-top: 0;
         }
         .card-preview pre {
           font-family: "DM Mono", monospace;
@@ -112,7 +152,78 @@ export default function SchemaCard({ schema, onSelect }) {
         .schema-card:hover .card-preview pre {
           color: #ffffff;
         }
+        .card-footer {
+          border-top: 1px solid #141414;
+          padding: 7px 14px;
+          display: flex;
+          align-items: center;
+          justify-content: flex-end;
+          min-height: 34px;
+        }
+        .delete-btn {
+          font-family: "DM Mono", monospace;
+          font-size: 9px;
+          color: #ffffff;
+          letter-spacing: 0.08em;
+          background: none;
+          border: 1px solid #1e1e1e;
+          border-radius: 2px;
+          padding: 3px 9px;
+          cursor: pointer;
+          transition: all 0.15s;
+        }
+        .delete-btn:hover {
+          color: #ef4444;
+          border-color: #ef444433;
+          background: #1a0808;
+        }
+        .confirm-row {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          animation: fadeIn 0.15s ease;
+        }
+        @keyframes fadeIn {
+          from { opacity: 0; transform: translateX(4px); }
+          to   { opacity: 1; transform: translateX(0); }
+        }
+        .confirm-text {
+          font-family: "DM Mono", monospace;
+          font-size: 9px;
+          color: #e8e8e8;
+          letter-spacing: 0.05em;
+        }
+        .confirm-yes {
+          font-family: "DM Mono", monospace;
+          font-size: 9px;
+          color: #ef4444;
+          background: #1a0808;
+          border: 1px solid #ef444433;
+          border-radius: 2px;
+          padding: 3px 9px;
+          cursor: pointer;
+          transition: all 0.15s;
+        }
+        .confirm-yes:hover {
+          background: #2a0a0a;
+          border-color: #ef4444;
+        }
+        .confirm-no {
+          font-family: "DM Mono", monospace;
+          font-size: 9px;
+          color: #f59e0b;
+          background: none;
+          border: 1px solid #222;
+          border-radius: 2px;
+          padding: 3px 9px;
+          cursor: pointer;
+          transition: all 0.15s;
+        }
+        .confirm-no:hover {
+          color: #f59e0b;
+          border-color: #f59e0b;
+        }
       `}</style>
-    </button>
+    </div>
   );
 }

@@ -30,7 +30,7 @@ export default function LanguagePicker({ languages, selected, onChange }) {
           align-items: center;
           gap: 0;
           background: #0a0a0a;
-          border: 1px solid #1e1e1e;
+          border: 0.5px solid #1e1e1e;
           border-radius: 4px;
           padding: 4px 8px;
           overflow-x: auto;
@@ -42,8 +42,9 @@ export default function LanguagePicker({ languages, selected, onChange }) {
         }
         .group-label {
           font-family: "DM Mono", monospace;
-          font-size: 9px;
-          color: #3a3a3a;
+          font-size: 15px;
+          font-weight: bold;
+          color: #999;
           letter-spacing: 0.1em;
           text-transform: uppercase;
           padding: 0 4px;
@@ -56,7 +57,7 @@ export default function LanguagePicker({ languages, selected, onChange }) {
         .divider {
           width: 1px;
           height: 20px;
-          background: #1e1e1e;
+          background: #999;
           margin: 0 10px;
           flex-shrink: 0;
         }
@@ -104,7 +105,7 @@ function LangButton({ lang, selected, onChange }) {
         .lang-label {
           font-family: "DM Mono", monospace;
           font-size: 11px;
-          color: ${isSelected ? "#f59e0b" : "#555"};
+          color: ${isSelected ? "#f59e0b" : "#888"};
           font-weight: ${isSelected ? "600" : "400"};
           transition: color 0.15s;
         }
